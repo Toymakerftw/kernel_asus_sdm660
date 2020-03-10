@@ -139,6 +139,7 @@ struct cdfingerfp_data {
 	struct rt_mutex buf_lock;
 	struct input_dev* cdfinger_input;
 	bool irq_enabled;
+	bool proximity_state; /* 0:far 1:near */
 }*g_cdfingerfp_data;
 
 static struct cdfinger_key_map maps[] = {
@@ -356,11 +357,6 @@ static int cdfinger_release(struct inode *inode,struct file *file)
 	return 0;
 }
 
-static void cdfinger_wake_lock(struct cdfingerfp_data *pdata)
-{
-	__pm_wakeup_event(&pdata->cdfinger_lock, msecs_to_jiffies(WAKELOCK_HOLD_TIME));
-}
-
 static void cdfinger_async_report(void)
 {
 	struct cdfingerfp_data *cdfingerfp = g_cdfingerfp_data;
@@ -463,7 +459,7 @@ static long cdfinger_ioctl(struct file* filp, unsigned int cmd, unsigned long ar
 	int err = 0;
 
 	struct cdfingerfp_data *cdfinger = filp->private_data;
-	struct cdfingerfp_data *pdata = g_cdfingerfp_data;
+	struct cdfingerfp_data *pdata = g_cdfingerfp_data; //pk
 
 	rt_mutex_lock(&cdfinger->buf_lock);
 	switch (cmd) {
@@ -537,6 +533,7 @@ static int cdfinger_fb_notifier_callback(struct notifier_block* self,
 										unsigned long event, void* data)
 {
 	struct fb_event* evdata = data;
+	struct cdfingerfp_data *cdfinger;
 	unsigned int blank;
 	int retval = 0;
 
@@ -546,17 +543,19 @@ static int cdfinger_fb_notifier_callback(struct notifier_block* self,
 
 	blank = *(int*)evdata->data;
 
-	switch (blank) {
+	switch (blank) { //pk
 		case FB_BLANK_UNBLANK:
 			rt_mutex_lock(&g_cdfingerfp_data->buf_lock);
 			screen_is_on = true;
 			rt_mutex_unlock(&g_cdfingerfp_data->buf_lock);
+			cdfinger_enable_irq(cdfinger);
 			break;
 
 		case FB_BLANK_POWERDOWN:
 			rt_mutex_lock(&g_cdfingerfp_data->buf_lock);
 			screen_is_on = false;
 			rt_mutex_unlock(&g_cdfingerfp_data->buf_lock);
+			cdfinger_disable_irq(cdfinger);
 			break;
 
 		default:
@@ -565,6 +564,43 @@ static int cdfinger_fb_notifier_callback(struct notifier_block* self,
 
 	return retval;
 }
+
+//PK
+static ssize_t proximity_state_set(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct cdfingerfp_data *cdfingerfp = dev_get_drvdata(dev);
+	int rc, val;
+
+	rc = kstrtoint(buf, 10, &val);
+	if (rc)
+		return -EINVAL;
+
+	cdfingerfp->proximity_state = !!val;
+
+	if (!screen_is_on) {
+		if (cdfingerfp->proximity_state) {
+			/* Disable IRQ when screen is off and proximity sensor is covered */
+			cdfinger_disable_irq(cdfingerfp);
+		} else {
+			/* Enable IRQ when screen is off and proximity sensor is uncovered */
+			cdfinger_enable_irq(cdfingerfp);
+		}
+	}
+
+	return count;
+}
+static DEVICE_ATTR(proximity_state, S_IWUSR, NULL, proximity_state_set);
+
+static struct attribute *attrs[] = {
+	&dev_attr_proximity_state.attr,
+	NULL
+};
+
+static const struct attribute_group attr_group = {
+	.attrs = attrs,
+};
+//pk
 
 static int cdfinger_probe(struct platform_device *pdev)
 {
@@ -588,6 +624,15 @@ static int cdfinger_probe(struct platform_device *pdev)
 	}
 	cdfingerdev->miscdev = &st_cdfinger_dev;
 	rt_mutex_init(&cdfingerdev->buf_lock);
+
+	dev_set_drvdata(&cdfingerdev->cdfinger_dev->dev, cdfingerdev);
+
+	status = sysfs_create_group(&cdfingerdev->cdfinger_dev->dev.kobj, &attr_group);
+	if (status) {
+		pr_err("%s: Failed to create sysfs\n", __func__);
+		sysfs_remove_group(&cdfingerdev->cdfinger_dev->dev.kobj, &attr_group);
+	}
+
 	wakeup_source_init(&cdfingerdev->cdfinger_lock, "cdfinger wakelock");
 
 	cdfingerdev->cdfinger_input = input_allocate_device();
