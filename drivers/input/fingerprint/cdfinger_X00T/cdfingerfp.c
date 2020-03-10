@@ -167,7 +167,7 @@ static void do_fp_boost_rem(struct work_struct *work)
 	if(fp_boost_active) {
 		ret = sched_set_boost(0);
 		if (ret)
-			pr_err("cpu-boost: HMP boost disable failed : CDF\n");
+			pr_err("cpu-boost: HMP boost disable failed\n");
 		fp_boost_active = false;
 	}
 }
@@ -180,7 +180,7 @@ static void do_fp_boost(struct work_struct *work)
 	if(fp_boost_active==false) {
 		ret = sched_set_boost(1);
 		if (ret)
-			pr_err("cpu-boost: HMP boost enable failed : CDF\n");
+			pr_err("cpu-boost: HMP boost enable failed\n");
 		else
 			fp_boost_active=true;
 	}

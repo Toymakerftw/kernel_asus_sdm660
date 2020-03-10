@@ -187,7 +187,7 @@ static void do_input_boost_rem(struct work_struct *work)
 	if (sched_boost_active) {
 		ret = sched_set_boost(0);
 		if (ret)
-			pr_err("cpu-boost: HMP boost disable failed : CPU\n");
+			pr_err("cpu-boost: HMP boost disable failed\n");
 		sched_boost_active = false;
 	}
 }
@@ -217,7 +217,7 @@ static void do_input_boost(struct work_struct *work)
 	if (sched_boost_on_input) {
 		ret = sched_set_boost(1);
 		if (ret)
-			pr_err("cpu-boost: HMP boost enable failed : CPU\n");
+			pr_err("cpu-boost: HMP boost enable failed\n");
 		else
 			sched_boost_active = true;
 	}
